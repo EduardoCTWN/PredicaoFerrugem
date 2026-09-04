@@ -1,0 +1,31 @@
+# segredos
+config.cfg
+!config.example.cfg
+.env
+*.pem
+*.key
+
+# modelos treinados
+modelos_regressao/
+modelos_por_safra/
+*.pkl
+!modelo/*.pkl
+
+# dados e saídas
+output/
+*.csv
+*.geojson
+resultados*.csv
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# ambiente
+.vscode/
+.idea/
+.DS_Store
