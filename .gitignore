@@ -6,16 +6,21 @@ config.cfg
 *.key
 
 # modelos treinados
-modelos_regressao/
-modelos_por_safra/
 *.pkl
-!modelo/*.pkl
+*.joblib
 
-# dados e saídas
+# saídas do pipeline
+Train/Classifier/Trained_classifiers/
+Train/Classifier/Reports/
+Train/Classifier/Results/
+Train/Regressor/Trained_regressors/
+Train/Regressor/Reports/
+Train/Regressor/Results/
 output/
-*.csv
 *.geojson
-resultados*.csv
+
+# dados
+*.csv
 
 # python
 __pycache__/
