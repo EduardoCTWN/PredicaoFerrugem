@@ -150,6 +150,7 @@ def kfold_train(X, y, groups, report_file, model_type="rf", n_splits=5, beta=1.0
                 reg_lambda=0.5,
                 random_state=42,
                 verbosity=-1,
+                n_jobs=8,
             )
         elif model_type == "xgb":
             ratio = 1.5
@@ -166,7 +167,7 @@ def kfold_train(X, y, groups, report_file, model_type="rf", n_splits=5, beta=1.0
                 reg_alpha=0.3,
                 reg_lambda=0.5,
                 random_state=42,
-                n_jobs=-1,
+                n_jobs=8,
                 verbosity=0,
             )
         elif model_type == "rf":
@@ -175,7 +176,7 @@ def kfold_train(X, y, groups, report_file, model_type="rf", n_splits=5, beta=1.0
                 max_depth=None,
                 min_samples_split=2,
                 min_samples_leaf=1,
-                n_jobs=-1,
+                n_jobs=8,
                 random_state=42,
             )
         else:
@@ -335,24 +336,21 @@ def run(
 ):
     df = load_data()
 
-    models_dir = "Train/Classifier/Trained_classifiers"
+    # Every run gets its own directory, so models, report and results
+    # stay together and past versions are never overwritten.
+    run_id = (
+        f"{execution_started_at:%Y%m%d_%H%M%S}_{model_type}"
+        f"_beta{beta}_temp{int(temp_includes)}"
+    )
+    run_dir = os.path.join("Train/Classifier/Runs", run_id)
+
+    models_dir = os.path.join(run_dir, "models")
     os.makedirs(models_dir, exist_ok=True)
 
-    output_report_dir = "Train/Classifier/Reports"
-    os.makedirs(output_report_dir, exist_ok=True)
-
-    results_dir = "Train/Classifier/Results"
-    os.makedirs(results_dir, exist_ok=True)
-
     if output_path is None:
-        output_path = os.path.join(
-            results_dir, f"results_classifier_{execution_started_at:%Y%m%d_%H%M%S}.csv"
-        )
+        output_path = os.path.join(run_dir, "results.csv")
 
-    output_report_path = os.path.join(
-        output_report_dir,
-        f"classifier_report_{execution_started_at:%Y-%m-%d_%H%M%S}.txt",
-    )
+    output_report_path = os.path.join(run_dir, "report.txt")
 
     if harvests is None:
         harvests = sorted(df["safra"].unique())
@@ -360,6 +358,13 @@ def run(
     results = []
 
     with open(output_report_path, "w", encoding="utf-8") as f:
+        # Header with everything needed to reproduce this run.
+        f.write(f"Run: {run_id}\n")
+        f.write(f"Started at: {execution_started_at:%Y-%m-%d %H:%M:%S}\n")
+        f.write(
+            f"Model: {model_type} | beta: {beta} | temp_includes: {temp_includes}\n"
+        )
+
         for test_harvest in harvests:
             f.write(f"\n------------ Testing {test_harvest} harvest ------------\n")
             print(f"Processing {test_harvest}...")
@@ -386,7 +391,17 @@ def run(
             file_name_model = f"{model_name}_{test_harvest}.pkl"
             full_path_models = os.path.join(models_dir, file_name_model)
 
-            joblib.dump(metrics_kfold["model"], full_path_models)
+            # The threshold travels with the model, so inference never has
+            # to guess which cut this model was calibrated for.
+            joblib.dump(
+                {
+                    "model": metrics_kfold["model"],
+                    "threshold": metrics_kfold["threshold"],
+                    "beta": beta,
+                    "temp_includes": temp_includes,
+                },
+                full_path_models,
+            )
             f.write(f"Model {full_path_models} saved\n\n")
 
             f.write("Average stats for Kfold training:\n")
@@ -424,6 +439,8 @@ def run(
                     "average_Precision": metrics_test["precision"],
                     "threshold": metrics_kfold["threshold"],
                     "beta": beta,
+                    "temp_includes": temp_includes,
+                    "run_id": run_id,
                 }
             )
 
@@ -433,7 +450,40 @@ def run(
 
         write_summary(df_results, f)
 
+    append_to_index(run_id, df_results, model_type, beta, temp_includes)
+    print(f"\nRun saved to {run_dir}")
+
     return df_results
+
+
+def append_to_index(run_id, df_results, model_type, beta, temp_includes):
+    """
+    Append one summary row per run to a central index, so runs can be
+    compared without opening each report.
+    """
+    if df_results.empty:
+        return
+
+    index_path = "Train/Classifier/runs_index.csv"
+
+    row = {
+        "run_id": run_id,
+        "model_type": model_type,
+        "beta": beta,
+        "temp_includes": temp_includes,
+        "mean_threshold": df_results["threshold"].mean(),
+        "mean_AUC": df_results["average_AUC"].mean(),
+        "mean_precision": df_results["average_Precision"].mean(),
+        "mean_recall": df_results["average_Recall"].mean(),
+        "mean_day_error": df_results["average_day_error"].mean(),
+    }
+
+    pd.DataFrame([row]).to_csv(
+        index_path,
+        mode="a",
+        header=not os.path.exists(index_path),
+        index=False,
+    )
 
 
 def write_summary(df_results, output_file):

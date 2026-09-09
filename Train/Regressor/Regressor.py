@@ -59,9 +59,6 @@ def load_data():
 
     df = df.drop(columns=cols_drop)
 
-    # CHECK IF IT IS NECESSARY
-    df = df.sort_values("data").groupby("ocorrencia_id").tail(1).reset_index(drop=True)
-
     return df
 
 
@@ -109,11 +106,11 @@ def train_and_evaluate(
             subsample=0.9,
             colsample_bytree=0.9,
             random_state=42,
-            n_jobs=-1,
+            n_jobs=8,
         )
         model_name = "xgb_harvest_regressor"
     else:
-        model = RandomForestRegressor(n_estimators=200, random_state=42, n_jobs=-1)
+        model = RandomForestRegressor(n_estimators=200, random_state=42, n_jobs=8)
         model_name = "rf_harvest_regressor"
 
     report_file.write(
@@ -199,29 +196,31 @@ def run(
 ):
     df = load_data()
 
-    models_dir = "Train/Regressor/Trained_regressors"
+    # Every run gets its own directory, so models, report and results
+    # stay together and past versions are never overwritten.
+    run_id = (
+        f"{execution_started_at:%Y%m%d_%H%M%S}_{model_type}"
+        f"_temp{int(temp_includes)}"
+    )
+    run_dir = os.path.join("Train/Regressor/Runs", run_id)
+
+    models_dir = os.path.join(run_dir, "models")
     os.makedirs(models_dir, exist_ok=True)
 
-    output_report_dir = "Train/Regressor/Reports"
-    os.makedirs(output_report_dir, exist_ok=True)
-
-    results_dir = "Train/Regressor/Results"
-    os.makedirs(results_dir, exist_ok=True)
-
     if output_path is None:
-        output_path = os.path.join(
-            results_dir, f"results_regressor_{execution_started_at:%Y%m%d_%H%M%S}.csv"
-        )
+        output_path = os.path.join(run_dir, "results.csv")
 
-    output_report_path = os.path.join(
-        output_report_dir,
-        f"regressor_report_{execution_started_at:%Y-%m-%d_%H%M%S}.txt",
-    )
+    output_report_path = os.path.join(run_dir, "report.txt")
 
     unique_harvests = sorted(df["safra"].unique()) if harvests is None else harvests
 
     results = []
     with open(output_report_path, "w", encoding="utf-8") as f:
+        # Header with everything needed to reproduce this run.
+        f.write(f"Run: {run_id}\n")
+        f.write(f"Started at: {execution_started_at:%Y-%m-%d %H:%M:%S}\n")
+        f.write(f"Model: {model_type} | temp_includes: {temp_includes}\n")
+
         for harvest in unique_harvests:
             print(f"processing {harvest}...")
             model, res = train_and_evaluate(df, harvest, f, model_type, temp_includes)
@@ -231,8 +230,15 @@ def run(
             file_name_model = f"{model_name}_{harvest}.pkl"
             full_path_models = os.path.join(models_dir, file_name_model)
             res["model_path"] = full_path_models
+            res["temp_includes"] = temp_includes
+            res["run_id"] = run_id
 
-            joblib.dump(model, full_path_models)
+            # temp_includes travels with the model, so inference never has
+            # to guess which feature set this model was trained on.
+            joblib.dump(
+                {"model": model, "temp_includes": temp_includes},
+                full_path_models,
+            )
             f.write(f"Model {full_path_models} saved\n\n")
 
             results.append(res)
@@ -258,6 +264,8 @@ def run(
             "Precision",
             "F1",
             "MedAE",
+            "temp_includes",
+            "run_id",
         ]
         results_df = df_results[sorted_columns]
 
@@ -265,7 +273,38 @@ def run(
 
         write_summary(results_df, f)
 
+    append_to_index(run_id, results_df, model_type, temp_includes)
+    print(f"\nRun saved to {run_dir}")
+
     return results_df
+
+
+def append_to_index(run_id, df_results, model_type, temp_includes):
+    """
+    Append one summary row per run to a central index, so runs can be
+    compared without opening each report.
+    """
+    if df_results.empty:
+        return
+
+    index_path = "Train/Regressor/runs_index.csv"
+
+    row = {
+        "run_id": run_id,
+        "model_type": model_type,
+        "temp_includes": temp_includes,
+        "mean_MAE": df_results["average_MAE"].mean(),
+        "mean_RMSE": df_results["average_RMSE"].mean(),
+        "mean_MedAE": df_results["MedAE"].mean(),
+        "mean_R2": df_results["average_R2"].mean(),
+    }
+
+    pd.DataFrame([row]).to_csv(
+        index_path,
+        mode="a",
+        header=not os.path.exists(index_path),
+        index=False,
+    )
 
 
 def write_summary(df_results, output_file):
@@ -285,4 +324,4 @@ def write_summary(df_results, output_file):
 
 
 if __name__ == "__main__":
-    run(datetime.now(), temp_includes=False)
+    run(datetime.now())

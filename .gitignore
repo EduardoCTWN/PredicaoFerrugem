@@ -8,19 +8,19 @@ config.cfg
 # modelos treinados
 *.pkl
 *.joblib
+Models/
 
 # saídas do pipeline
-Train/Classifier/Trained_classifiers/
-Train/Classifier/Reports/
-Train/Classifier/Results/
-Train/Regressor/Trained_regressors/
-Train/Regressor/Reports/
-Train/Regressor/Results/
+Train/Classifier/Runs/
+Train/Regressor/Runs/
+!Train/Classifier/runs_index.csv
+!Train/Regressor/runs_index.csv
 output/
 *.geojson
 
 # dados
 *.csv
+!Train/features_SI.csv
 
 # python
 __pycache__/
