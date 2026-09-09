@@ -209,9 +209,10 @@ def print_evaluation(prediction, consolidated, arrival, season, base_date):
         .reset_index()
     )
 
-    comparacao = data_alerta.merge(
-        arrival[arrival["safra"] == season], on="municipio_id", how="inner"
-    )
+    arrival_season = arrival[arrival["safra"] == season]
+    confirmados = set(arrival_season["municipio_id"])
+
+    comparacao = data_alerta.merge(arrival_season, on="municipio_id", how="inner")
 
     print("\n" + "=" * 62)
     print(f"AVALIAÇÃO — {base_date:%Y-%m-%d}  |  safra {season}")
@@ -222,7 +223,7 @@ def print_evaluation(prediction, consolidated, arrival, season, base_date):
     print(f"  {'com alerta ativo':<32} {positivos:>8d}  ({positivos / total:.1%})")
     print(f"  {'instâncias processadas':<32} {len(prediction):>8d}")
 
-    print("\nProbabilidade prevista")
+    print("\nProbabilidade prevista (último dia da série)")
     prob = prediction["predito_prob"]
     print(f"  {'média':<32} {prob.mean():>8.3f}")
     print(f"  {'mediana':<32} {prob.median():>8.3f}")
@@ -260,8 +261,38 @@ def print_evaluation(prediction, consolidated, arrival, season, base_date):
         q = int(mask.sum())
         print(f"    {label:<30} {q:>6d}  ({q / n:.1%})")
 
+    # Does the model actually tell municipalities apart, or does it just
+    # flag everyone early? If both groups latched around the same date,
+    # the lead time above is an artefact of blanket coverage, not of
+    # prediction.
+    data_alerta["teve_ocorrencia"] = data_alerta["municipio_id"].isin(confirmados)
+
+    print("\nDiscriminação — data em que a trava fechou, por grupo")
+    resumo = (
+        data_alerta.groupby("teve_ocorrencia")["data_alerta"]
+        .agg(["count", "min", "median", "max"])
+        .rename(index={False: "sem ocorrência", True: "com ocorrência"})
+    )
+    for grupo, linha in resumo.iterrows():
+        print(
+            f"  {grupo:<20} n={linha['count']:>4}  "
+            f"primeira={linha['min']:%Y-%m-%d}  "
+            f"mediana={linha['median']:%Y-%m-%d}  "
+            f"última={linha['max']:%Y-%m-%d}"
+        )
+
+    if len(resumo) == 2:
+        delta = (
+            resumo.loc["sem ocorrência", "median"]
+            - resumo.loc["com ocorrência", "median"]
+        ).days
+        print(
+            f"\n  Municípios com ocorrência travaram {delta} dias antes "
+            "dos demais (mediana)."
+        )
+        print("  Valor próximo de zero indica que o modelo não distingue.")
+
     # Confirmed occurrences the model never flagged: the costly misses.
-    confirmados = set(arrival[arrival["safra"] == season]["municipio_id"])
     alertados = set(data_alerta["municipio_id"])
     perdidos = confirmados - alertados
 
