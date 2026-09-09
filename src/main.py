@@ -372,19 +372,34 @@ def main(
 
 
 if __name__ == "__main__":
-    # receive the date by the command line - today as default
+    parser = argparse.ArgumentParser(
+        description="Gera o mapa de risco de ferrugem asiática para uma data."
+    )
+    parser.add_argument(
+        "date",
+        nargs="?",
+        default=None,
+        help="data base no formato YYYY-MM-DD (padrão: hoje)",
+    )
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=None,
+        help="limiar do classificador (padrão: o calibrado no treino)",
+    )
+    parser.add_argument(
+        "--veto-days",
+        type=int,
+        default=None,
+        help="dias acima dos quais o alerta é vetado pelo regressor",
+    )
+
+    args = parser.parse_args()
+
     data = (
-        pd.to_datetime(sys.argv[1])
-        if len(sys.argv) > 1
+        pd.to_datetime(args.date)
+        if args.date
         else pd.to_datetime(datetime.now().date())
     )
 
-    classifier_threshold = float(sys.argv[2]) if len(sys.argv) > 2 else None
-    regressor_threshold = int(sys.argv[3]) if len(sys.argv) > 3 else None
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("date", nargs="?", default=None)
-    parser.add_argument("--threshold", type=float, default=None)
-    parser.add_argument("--veto-days", type=int, default=None)
-    args = parser.parse_args()
-    main(data, classifier_threshold, regressor_threshold)
+    main(data, args.threshold, args.veto_days)
