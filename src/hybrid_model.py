@@ -24,7 +24,13 @@ def load_models():
     if not os.path.exists(regressor_path):
         raise FileNotFoundError(f"Regressor not found: {regressor_path}")
 
-    return joblib.load(classifier_path), joblib.load(regressor_path)
+    def unwrap(path):
+        # Newer runs store {"model": ..., "threshold": ...}; older ones
+        # store the estimator directly.
+        bundle = joblib.load(path)
+        return bundle["model"] if isinstance(bundle, dict) else bundle
+
+    return unwrap(classifier_path), unwrap(regressor_path)
 
 
 def predict(
