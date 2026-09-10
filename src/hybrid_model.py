@@ -84,14 +84,34 @@ def consolidate_by_municipalitie(prediction: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def apply_latch(predictions: pd.DataFrame) -> pd.DataFrame:
+def apply_latch(predictions: pd.DataFrame, min_consecutive: int = 1) -> pd.DataFrame:
     """
     Once a municipality turns positive it stays positive for the rest of
     the season: rust does not un-arrive.
+
+    With min_consecutive above 1, a single day above the threshold is not
+    enough to trip the latch — the model has to stay positive for that
+    many observations in a row.
     """
     df = predictions.sort_values(["municipio_id", "data"]).copy()
 
-    df["trava_positiva"] = df.groupby("municipio_id")["classe_predita"].cummax()
+    if min_consecutive > 1:
+        # Number each run of equal values, then count how far into its
+        # own run each row sits.
+        changed = (
+            df["classe_predita"] != df.groupby("municipio_id")["classe_predita"].shift()
+        )
+        blocks = changed.groupby(df["municipio_id"]).cumsum()
+        streak = df.groupby(["municipio_id", blocks]).cumcount() + 1
+
+        trigger = ((df["classe_predita"] == 1) & (streak >= min_consecutive)).astype(
+            int
+        )
+    else:
+        trigger = df["classe_predita"]
+
+    # cummax propagates the first trigger forward within each group.
+    df["trava_positiva"] = trigger.groupby(df["municipio_id"]).cummax()
 
     return df
 

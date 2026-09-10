@@ -1,9 +1,8 @@
 import argparse
 import configparser
-import json
 import os
+import shutil
 import subprocess
-import sys
 import time
 import uuid
 from datetime import datetime, timedelta
@@ -17,6 +16,7 @@ from Helpers.season import season_of
 import features
 import generate_geojson
 import hybrid_model
+from relatory import write_report
 
 # Keep the token
 _token = None
@@ -37,7 +37,8 @@ def read_cfg():
     Read config.cfg from the repository
     """
     cfg = configparser.ConfigParser()
-    cfg.read(os.path.abspath(CONFIG_PATH))
+    if not cfg.read(CONFIG_PATH, encoding="utf-8"):
+        raise FileNotFoundError(f"Config file not found: {CONFIG_PATH}")
     return cfg
 
 
@@ -144,15 +145,26 @@ def exec_dag(dag_id: str, conf: dict) -> None:
 
 def collect(remote_path: str) -> str:
     """
-    Collect the data from an SSH server
+    Bring a file produced by the DAG into the output directory.
+
+    Running on the same machine as Airflow, the file is already on this
+    filesystem, so a local copy replaces the scp round trip — and the
+    password prompt that came with it.
     """
+    work_dir = PREC_DIR
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    destination = work_dir / Path(remote_path).name
+
+    if os.path.exists(remote_path):
+        shutil.copy2(remote_path, destination)
+        print(f"Collected {destination}")
+        return str(destination)
+
+    # Fallback for running from outside the server.
     cfg = read_cfg()
     ssh_user = cfg.get("server", "username")
     ssh_host = cfg.get("server", "host")
-    work_dir = PREC_DIR
-
-    work_dir.mkdir(parents=True, exist_ok=True)
-    destination = work_dir / Path(remote_path).name
     source = f"{ssh_user}@{ssh_host}:{remote_path}"
 
     r = subprocess.run(
@@ -169,14 +181,21 @@ def send_geojson(
     local_path: str, base_date: pd.Timestamp, prefix: str = "ferrugem"
 ) -> None:
     """
-    Upload a GeoJSON to the server as {prefix}_DD-MM-YYYY.geojson
+    Publish a GeoJSON as {prefix}_DD-MM-YYYY.geojson, copying locally
+    when the destination is on this same machine.
     """
     cfg = read_cfg()
-    ssh_usuario = cfg.get("server", "username")
-    ssh_host = cfg.get("server", "host")
-
     remote_dir = cfg.get("server", "dir_rust")
     name = f"{prefix}_{base_date.strftime('%d-%m-%Y')}.geojson"
+
+    if os.path.isdir(remote_dir) or os.path.isdir(os.path.dirname(remote_dir)):
+        os.makedirs(remote_dir, exist_ok=True)
+        shutil.copy2(local_path, os.path.join(remote_dir, name))
+        print(f"enviado: {remote_dir}/{name}")
+        return
+
+    ssh_usuario = cfg.get("server", "username")
+    ssh_host = cfg.get("server", "host")
     destination = f"{ssh_usuario}@{ssh_host}:{remote_dir}/{name}"
 
     subprocess.run(
@@ -191,7 +210,7 @@ def send_geojson(
     print(f"enviado: {remote_dir}/{name}")
 
 
-def print_evaluation(prediction, consolidated, arrival, season, base_date):
+def print_evaluation(prediction, consolidated, arrival, season, base_date, config):
     """
     Print every metric used to judge the run, so a single console output
     tells whether this configuration is better than the previous one.
@@ -217,6 +236,10 @@ def print_evaluation(prediction, consolidated, arrival, season, base_date):
     print("\n" + "=" * 62)
     print(f"AVALIAÇÃO — {base_date:%Y-%m-%d}  |  safra {season}")
     print("=" * 62)
+
+    print("\nConfiguração")
+    for k, v in config.items():
+        print(f"  {k:<32} {v}")
 
     print("\nCobertura")
     print(f"  {'municípios avaliados':<32} {total:>8d}")
@@ -302,7 +325,11 @@ def print_evaluation(prediction, consolidated, arrival, season, base_date):
 
 
 def main(
-    base_date: pd.Timestamp, classifier_threshold, regressor_threshold
+    base_date: pd.Timestamp,
+    classifier_threshold=None,
+    regressor_threshold=None,
+    beta=None,
+    min_consecutive: int = 1,
 ) -> tuple[str, str]:
     cfg = read_cfg()
     stamp = base_date.strftime("%Y%m%d")
@@ -348,7 +375,7 @@ def main(
 
     # --- model ---
     prediction = hybrid_model.predict(df, classifier_threshold, regressor_threshold)
-    prediction = hybrid_model.apply_latch(prediction)
+    prediction = hybrid_model.apply_latch(prediction, min_consecutive)
     consolidated = hybrid_model.consolidate_by_municipalitie(prediction)
 
     # --- confirmed occurrences, collected beforehand by the consortium
@@ -366,30 +393,15 @@ def main(
     consolidated = consolidated.merge(
         arrival[arrival["safra"] == season], on="municipio_id", how="left"
     )
-    arrival = map_occurrences_to_municipalities(occurrences_csv)
-    consolidated = consolidated.merge(
-        arrival[arrival["safra"] == season], on="municipio_id", how="left"
-    )
 
-    # --- antecedência do alerta em relação à ocorrência real ---
-    data_alerta = (
-        prediction[prediction["trava_positiva"] == 1]
-        .groupby("municipio_id")["data"]
-        .min()
-        .rename("data_alerta")
-        .reset_index()
-    )
+    config = {
+        "threshold": classifier_threshold,
+        "beta": beta,
+        "veto_days": regressor_threshold,
+        "min_consecutive": min_consecutive,
+    }
 
-    comparacao = data_alerta.merge(
-        arrival[arrival["safra"] == season], on="municipio_id", how="inner"
-    )
-
-    antecedencia = (
-        pd.to_datetime(comparacao["data_chegada_real"])
-        - pd.to_datetime(comparacao["data_alerta"])
-    ).dt.days
-
-    print_evaluation(prediction, consolidated, arrival, season, base_date)
+    write_report(prediction, consolidated, arrival, season, base_date, config)
 
     # --- geojson ---
     polygons_path, points_path = generate_geojson.generate_map_files(
@@ -404,13 +416,15 @@ def main(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Gera o mapa de risco de ferrugem asiática para uma data."
+        description="Gera o mapa de risco de ferrugem asiática para uma data.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
         "date",
         nargs="?",
         default=None,
-        help="data base no formato YYYY-MM-DD (padrão: hoje)",
+        metavar="YYYY-MM-DD",
+        help="data base da simulação (padrão: hoje)",
     )
     parser.add_argument(
         "--threshold",
@@ -419,18 +433,30 @@ if __name__ == "__main__":
         help="limiar do classificador (padrão: o calibrado no treino)",
     )
     parser.add_argument(
+        "--beta",
+        type=float,
+        default=None,
+        help="beta com que o limiar foi calibrado; só registra no relatório",
+    )
+    parser.add_argument(
         "--veto-days",
         type=int,
         default=None,
         help="dias acima dos quais o alerta é vetado pelo regressor",
     )
+    parser.add_argument(
+        "--min-consecutive",
+        type=int,
+        default=1,
+        help="dias positivos seguidos para fechar a trava",
+    )
 
     args = parser.parse_args()
 
     data = (
-        pd.to_datetime(args.date)
+        pd.to_datetime(args.date, format="%Y-%m-%d")
         if args.date
         else pd.to_datetime(datetime.now().date())
     )
 
-    main(data, args.threshold, args.veto_days)
+    main(data, args.threshold, args.veto_days, args.beta, args.min_consecutive)
