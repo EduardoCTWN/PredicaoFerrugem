@@ -32,7 +32,7 @@ def get_git_commit() -> str | None:
         return None
 
 
-def build_metrics(prediction, consolidated, arrival, season):
+def build_metrics(prediction, consolidated, arrival, season, base_date):
     """
     Compute every number the report shows, so the text file and the index
     can never disagree with each other.
@@ -41,6 +41,13 @@ def build_metrics(prediction, consolidated, arrival, season):
     """
     arrival_season = arrival[arrival["safra"] == season]
     confirmed = set(arrival_season["municipio_id"])
+
+    already = arrival_season[
+        pd.to_datetime(arrival_season["data_chegada_real"]) <= base_date
+    ]
+    pending = arrival_season[
+        pd.to_datetime(arrival_season["data_chegada_real"]) > base_date
+    ]
 
     # The alert date is the first day the latch closed, which is what the
     # map actually shows.
@@ -140,7 +147,9 @@ def write_report(
     run_dir = REPORTS_DIR / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    m, alert_date, comparison = build_metrics(prediction, consolidated, arrival, season)
+    m, alert_date, comparison = build_metrics(
+        prediction, consolidated, arrival, season, base_date
+    )
 
     config = {**config, "git_commit": get_git_commit()}
 
@@ -167,7 +176,15 @@ def write_report(
         f.write(f"  {'taxa de acerto do alerta':<30} {m['taxa_acerto']:>8.1%}\n")
         f.write(f"  {'taxa base (acaso)':<30} {m['taxa_base']:>8.1%}\n")
         f.write(f"  {'ganho sobre o acaso':<30} {m['ganho_sobre_acaso']:>+8.1%}\n")
-        f.write(f"  {'ocorrências sem alerta algum':<30} {m['perdidos']:>8d}\n")
+
+        f.write("\nOcorrências\n")
+        f.write(f"  {'na safra (total)':<30} {m['ocorrencias_na_safra']:>8d}\n")
+        f.write(
+            f"  {'já ocorridas até a data':<30} {m['ocorrencias_ate_a_data']:>8d}\n"
+        )
+        f.write(f"  {'  destas, sem alerta':<30} {m['perdidos']:>8d}\n")
+        f.write(f"  {'ainda por ocorrer':<30} {m['ocorrencias_pendentes']:>8d}\n")
+        f.write(f"  {'  destas, já alertadas':<30} {m['antecipados']:>8d}\n")
 
         if m["confirmados_alertados"]:
             n = m["confirmados_alertados"]
@@ -222,8 +239,11 @@ def write_report(
     # The costly misses: they show up in no other metric, because the
     # lead time is computed with an inner join.
     latched = set(alert_date["municipio_id"])
+
     missed = arrival[arrival["safra"] == season]
+    missed = missed[pd.to_datetime(missed["data_chegada_real"]) <= base_date]
     missed = missed[~missed["municipio_id"].isin(latched)]
+
     missed.to_csv(run_dir / "perdidos.csv", index=False, sep=";")
 
     append_to_index(run_id, base_date, season, config, m)
