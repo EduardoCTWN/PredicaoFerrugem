@@ -16,8 +16,6 @@ def generate_geojson(
     # get the municipalities from the shapefile
     municipalities, _ = load_municipalities()
 
-    # CD_MUN is the IBGE code: a stable merge key, unlike the row position.
-    # NM_MUN comes in upper case, so title case reads better on the map.
     gdf = municipalities.rename(
         columns={"CD_MUN": "municipio_id", "NM_MUN": "municipio"}
     )
@@ -30,9 +28,7 @@ def generate_geojson(
     # set the simulation date
     gdf["data_simulacao"] = base_date.strftime("%Y-%m-%d")
 
-    # rename to the labels shown on the map tooltip. This has to come
-    # before the columns are touched, otherwise creating a missing one
-    # first would leave two columns with the same name after the rename.
+    # rename to the labels shown on the map tooltip..
     gdf = gdf.rename(
         columns={
             "dias_ate_chegada": "Dias ate a chegada da ferrugem",
@@ -56,7 +52,7 @@ def generate_geojson(
     if days_col in gdf.columns:
         gdf[days_col] = gdf[days_col].astype("Int64")
 
-    # drop vertices that sit within ~100m of the simplified line
+    # drop vertices that sit within 100m of the simplified line
     gdf["geometry"] = gdf.geometry.simplify(0.001, preserve_topology=True)
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -74,6 +70,7 @@ def generate_occurrences_geojson(
     # keep only the season being mapped
     df = occurrences[occurrences["safra"] == season].copy()
     df["data"] = pd.to_datetime(df["data"])
+    # the occorrence only appear after the report
     df = df[df["data"] <= base_date]
     # drop the data that do not have lat/long values - they cannot be placed in the map
     df = df.dropna(subset=["latitude", "longitude"])

@@ -382,8 +382,8 @@ def main(
     consolidated = hybrid_model.consolidate_by_municipalitie(prediction)
     consolidated["municipio_id"] = normalize_municipio_id(consolidated["municipio_id"])
 
-    # --- confirmed occurrences, collected beforehand by the consortium
-    # extractor script ---
+    # confirmed occurrences, collected beforehand by the consortium
+    # extractor script
     occurrences_csv = BASE_DIR / cfg.get("paths", "occurrences_csv")
     if not os.path.exists(occurrences_csv):
         raise FileNotFoundError(
@@ -393,7 +393,7 @@ def main(
 
     occurrences = pd.read_csv(occurrences_csv, encoding="utf-8-sig")
 
-    arrival = map_occurrences_to_municipalities(occurrences_csv, base_date)
+    arrival = map_occurrences_to_municipalities(occurrences_csv)
     consolidated = consolidated.merge(
         arrival[arrival["safra"] == season], on="municipio_id", how="left"
     )

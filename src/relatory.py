@@ -70,8 +70,6 @@ def build_metrics(prediction, consolidated, arrival, season, base_date):
         "cobertura": latched / total if total else 0.0,
         "ocorrencias_na_safra": len(confirmed),
         "taxa_acerto": hits / latched if latched else 0.0,
-        # What a random pick of the same size would achieve. Without it,
-        # "14 hits out of 69" means nothing.
         "taxa_base": len(confirmed) / total if total else 0.0,
         "perdidos": len(confirmed - set(alert_date["municipio_id"])),
         "prob_media": float(prediction["predito_prob"].mean()),

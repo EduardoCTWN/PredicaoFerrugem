@@ -12,7 +12,7 @@ from Helpers.season import season_start_of
 STEP_DAYS = 2
 FLOOR_DAYS = 20
 
-# Grid cells sit ~0.1 degrees apart, so anything beyond this means the
+# Grid cells sit 0.1 degrees apart, so anything beyond this means the
 # municipality has no nearby precipitation data.
 MAX_DIST_DEGREES = 0.15
 
@@ -66,9 +66,7 @@ def map_points_to_segment(
 
     out = points.copy()
 
-    # query returns positions in `grid`, not segment_ids. Indexing the id
-    # array with them does the translation — using idx directly would
-    # silently attach the wrong cell to each municipality.
+    # query returns positions in `grid`, not segment_ids.
     out["segment_id"] = grid["segment_id"].to_numpy()[idx]
 
     # keeps the distance so the mapping can be sanity-checked below
@@ -89,8 +87,7 @@ def load_data(prec_path: str) -> tuple[gpd.GeoDataFrame, pd.DataFrame]:
     prec = pd.read_csv(prec_path, sep=";")
     prec["date_precipitation"] = pd.to_datetime(prec["date_precipitation"])
 
-    # The trained model expects columns named after occurrences, so the
-    # centroids inherit that vocabulary even though these are municipalities.
+    # The trained model expects columns named after occurrences
     municipalities = load_municipalities_as_points(
         lat_col="ocorrencia_latitude", lon_col="ocorrencia_longitude"
     )
@@ -274,8 +271,7 @@ def run(
 
     municipalities, prec = load_data(prec_path)
 
-    # Drop the geometry before generating instances: the row is copied
-    # once per date, and the polygons would be replicated ~170 times each.
+    # Drop the geometry before generating instances
     light_cols = [
         "municipio_id",
         "municipio",
