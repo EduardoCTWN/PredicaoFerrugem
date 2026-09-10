@@ -64,14 +64,24 @@ def build_metrics(prediction, consolidated, arrival, season, base_date):
     latched = len(alert_date)
     hits = int(alert_date["teve_ocorrencia"].sum())
 
+    already_ids = set(already["municipio_id"])
+    pending_ids = set(pending["municipio_id"])
+    latched_ids = set(alert_date["municipio_id"])
+
     m = {
         "municipios": total,
         "travados": latched,
         "cobertura": latched / total if total else 0.0,
         "ocorrencias_na_safra": len(confirmed),
+        "ocorrencias_ate_a_data": len(already_ids),
+        # The costly miss: it already happened and nobody was warned.
+        # Cases still ahead of base_date are not failures.
+        "perdidos": len(already_ids - latched_ids),
+        "ocorrencias_pendentes": len(pending_ids),
+        # Alerts already standing for cases still to come.
+        "antecipados": len(pending_ids & latched_ids),
         "taxa_acerto": hits / latched if latched else 0.0,
         "taxa_base": len(confirmed) / total if total else 0.0,
-        "perdidos": len(confirmed - set(alert_date["municipio_id"])),
         "prob_media": float(prediction["predito_prob"].mean()),
         "prob_mediana": float(prediction["predito_prob"].median()),
     }
