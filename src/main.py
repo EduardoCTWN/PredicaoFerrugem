@@ -11,7 +11,10 @@ from pathlib import Path
 import pandas as pd
 import requests
 
-from Helpers.mapping_real_occorrences import map_occurrences_to_municipalities
+from Helpers.mapping_real_occorrences import (
+    map_occurrences_to_municipalities,
+    normalize_municipio_id,
+)
 from Helpers.season import season_of
 import features
 import generate_geojson
@@ -377,6 +380,7 @@ def main(
     prediction = hybrid_model.predict(df, classifier_threshold, regressor_threshold)
     prediction = hybrid_model.apply_latch(prediction, min_consecutive)
     consolidated = hybrid_model.consolidate_by_municipalitie(prediction)
+    consolidated["municipio_id"] = normalize_municipio_id(consolidated["municipio_id"])
 
     # --- confirmed occurrences, collected beforehand by the consortium
     # extractor script ---

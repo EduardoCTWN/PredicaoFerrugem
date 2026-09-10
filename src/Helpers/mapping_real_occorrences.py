@@ -5,6 +5,16 @@ from Helpers.municiples import load_municipalities
 from Helpers.season import season_of
 
 
+def normalize_municipio_id(series: pd.Series) -> pd.Series:
+    """
+    Return the IBGE code as a plain 7-digit string.
+
+    Going through Int64 first strips the ".0" that a
+    direct astype(str) would leave behind.
+    """
+    return series.astype("Int64").astype(str)
+
+
 def map_occurrences_to_municipalities(occurrences_path) -> pd.DataFrame:
     """
     Spatially join the consortium occurrences to the municipality
@@ -28,16 +38,24 @@ def map_occurrences_to_municipalities(occurrences_path) -> pd.DataFrame:
     municipalities, _ = load_municipalities()
     municipalities = municipalities.rename(columns={"CD_MUN": "municipio_id"})
 
-    # join the geodataframe from the real occurrences with the municipalities maintaining all the occurrences by the left parameter
-    # the within parameter is used because the occurrences were reported in real localities
+    # join the geodataframe from the real occurrences with the municipalities
+    # keeping every occurrence by the left parameter, so the ones outside the
+    # shapefile can be counted below.
+    # the within parameter is used because the occurrences were reported in
+    # real localities inside a municipality
     joined = gpd.sjoin(
         occurrences,
         municipalities[["municipio_id", "geometry"]],
         how="left",
         predicate="within",
     )
+
+    # The consortium's season label does not match ours, so derive it from
+    # the occurrence date: the date is a fact, the label is a convention.
     joined["safra"] = joined["data"].map(season_of)
-    # the occurrences that were not joined are from outside the shapefile, so they don't get a municipio_id and they are reported here
+
+    # the occurrences that were not joined are from outside the shapefile,
+    # so they don't get a municipio_id and they are reported here
     outside = joined["municipio_id"].isna().sum()
     if outside:
         print(f"{outside} occurrences that don't belong to shapefile")
@@ -51,8 +69,6 @@ def map_occurrences_to_municipalities(occurrences_path) -> pd.DataFrame:
         .reset_index()
     )
 
-    # sjoin turns the string ids into float when it introduces NaN;
-    # bring them back so the merge key matches.
-    arrival["municipio_id"] = arrival["municipio_id"].astype(str)
+    arrival["municipio_id"] = normalize_municipio_id(arrival["municipio_id"])
 
     return arrival
