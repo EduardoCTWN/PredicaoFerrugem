@@ -66,13 +66,15 @@ def generate_geojson(
 
 
 def generate_occurrences_geojson(
-    occurrences: pd.DataFrame, output_path: str, season: str
+    occurrences: pd.DataFrame, output_path: str, season: str, base_date
 ) -> str:
     """
     Write the confirmed occurrences as points, one feature per report.
     """
     # keep only the season being mapped
     df = occurrences[occurrences["safra"] == season].copy()
+    df["data"] = pd.to_datetime(df["data"])
+    df = df[df["data"] <= base_date]
     # drop the data that do not have lat/long values - they cannot be placed in the map
     df = df.dropna(subset=["latitude", "longitude"])
 
@@ -101,7 +103,7 @@ def generate_occurrences_geojson(
 def generate_map_files(
     predictions: pd.DataFrame,
     occurrences: pd.DataFrame,
-    output_dir: str,
+    output_dir,
     base_date: pd.Timestamp,
     season: str,
 ) -> tuple[str, str]:
@@ -118,7 +120,7 @@ def generate_map_files(
         predictions, output_dir / f"municipios_{stamp}.geojson", base_date
     )
     points_path = generate_occurrences_geojson(
-        occurrences, output_dir / f"ocorrencias_{stamp}.geojson", season
+        occurrences, output_dir / f"ocorrencias_{stamp}.geojson", season, base_date
     )
 
     return str(polygons_path), str(points_path)

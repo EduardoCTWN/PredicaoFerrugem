@@ -15,7 +15,7 @@ def normalize_municipio_id(series: pd.Series) -> pd.Series:
     return series.astype("Int64").astype(str)
 
 
-def map_occurrences_to_municipalities(occurrences_path) -> pd.DataFrame:
+def map_occurrences_to_municipalities(occurrences_path, base_date) -> pd.DataFrame:
     """
     Spatially join the consortium occurrences to the municipality
     polygons and return the first occurrence date per municipality
@@ -53,6 +53,9 @@ def map_occurrences_to_municipalities(occurrences_path) -> pd.DataFrame:
     # The consortium's season label does not match ours, so derive it from
     # the occurrence date: the date is a fact, the label is a convention.
     joined["safra"] = joined["data"].map(season_of)
+
+    if base_date is not None:
+        joined = joined[joined["data"] <= base_date]
 
     # the occurrences that were not joined are from outside the shapefile,
     # so they don't get a municipio_id and they are reported here

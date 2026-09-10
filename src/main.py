@@ -393,7 +393,7 @@ def main(
 
     occurrences = pd.read_csv(occurrences_csv, encoding="utf-8-sig")
 
-    arrival = map_occurrences_to_municipalities(occurrences_csv)
+    arrival = map_occurrences_to_municipalities(occurrences_csv, base_date)
     consolidated = consolidated.merge(
         arrival[arrival["safra"] == season], on="municipio_id", how="left"
     )
