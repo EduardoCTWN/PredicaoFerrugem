@@ -4,6 +4,7 @@ import geopandas as gpd
 import pandas as pd
 
 from Helpers.municiples import load_municipalities
+from Helpers.season import season_of
 
 
 def generate_geojson(
@@ -68,8 +69,9 @@ def generate_occurrences_geojson(
     Write the confirmed occurrences as points, one feature per report.
     """
     # keep only the season being mapped
-    df = occurrences[occurrences["safra"] == season].copy()
+    df = occurrences.copy()
     df["data"] = pd.to_datetime(df["data"])
+    df["safra"] = df["data"].map(season_of)
     # the occorrence only appear after the report
     df = df[df["data"] <= base_date]
     # drop the data that do not have lat/long values - they cannot be placed in the map
