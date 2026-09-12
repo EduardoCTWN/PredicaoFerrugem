@@ -73,7 +73,7 @@ def generate_occurrences_geojson(
     df["data"] = pd.to_datetime(df["data"])
     df["safra"] = df["data"].map(season_of)
     # the occorrence only appear after the report
-    df = df[df["data"] <= base_date]
+    df = df[(df["safra"] == season) & (df["data"] <= base_date)]
     # drop the data that do not have lat/long values - they cannot be placed in the map
     df = df.dropna(subset=["latitude", "longitude"])
 
