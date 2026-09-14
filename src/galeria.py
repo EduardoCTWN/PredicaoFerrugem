@@ -25,7 +25,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-REPORTS_DIR = BASE_DIR / "output" / "relatorios" / "semanal"
+REPORTS_DIR = BASE_DIR / "output" / "relatorios" / "semanal_vizinhos_min2_com_correcao"
 GALLERY_PATH = REPORTS_DIR / "galeria.html"
 
 # Vermelho para alerta, verde para sem alerta: a mesma paleta do mapa
