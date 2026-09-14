@@ -20,6 +20,7 @@ import features
 import generate_geojson
 import hybrid_model
 from relatory import write_report
+from src.Helpers import adjacency
 
 # Keep the token
 _token = None
@@ -379,6 +380,7 @@ def main(
     # --- model ---
     prediction = hybrid_model.predict(df, classifier_threshold, regressor_threshold)
     prediction = hybrid_model.apply_latch(prediction, min_consecutive)
+    prediction = adjacency.neighbours_alert(prediction)
     consolidated = hybrid_model.consolidate_by_municipalitie(prediction)
     consolidated["municipio_id"] = normalize_municipio_id(consolidated["municipio_id"])
 
