@@ -21,6 +21,7 @@ import generate_geojson
 import hybrid_model
 from relatory import write_report
 from Helpers import adjacency
+from src.Helpers import correction
 
 # Keep the token
 _token = None
@@ -381,6 +382,7 @@ def main(
     prediction = hybrid_model.predict(df, classifier_threshold, regressor_threshold)
     prediction = hybrid_model.apply_latch(prediction, min_consecutive)
     prediction = adjacency.neighbours_alert(prediction)
+    prediction = correction.correct_model(prediction, arrival, season)
     consolidated = hybrid_model.consolidate_by_municipalitie(prediction)
     consolidated["municipio_id"] = normalize_municipio_id(consolidated["municipio_id"])
 

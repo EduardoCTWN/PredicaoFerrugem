@@ -2,7 +2,7 @@ from functools import lru_cache
 
 import geopandas as gpd
 
-from municiples import load_municipalities
+from Helpers.municiples import load_municipalities
 
 
 @lru_cache(maxsize=1)
@@ -32,7 +32,7 @@ def build_adjacency() -> dict:
     )
 
 
-def neighbours_alert(prediction, min_neighbours: int = 3):
+def neighbours_alert(prediction, min_neighbours: int = 2):
     """
     Flag a municipality when enough of its neighbours are already
     flagged: rust spreads by spores, so a ring of active foci is itself

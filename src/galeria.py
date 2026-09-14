@@ -30,7 +30,9 @@ GALLERY_PATH = REPORTS_DIR / "galeria.html"
 
 # Vermelho para alerta, verde para sem alerta: a mesma paleta do mapa
 # interativo, para que a galeria não confunda quem já viu o produto.
-COLORS = {0: "#1a9850", 1: "#d73027"}
+COLOR_CONFIRMED = "#8B0000"
+COLOR_ALERT = "#d73027"
+COLOR_NONE = "#1a9850"
 
 THUMB_SIZE = (3.2, 2.6)
 THUMB_DPI = 70
@@ -90,14 +92,29 @@ def render_thumb(geojson_path: Path, points_path: Path | None) -> str:
 
     fig, ax = plt.subplots(figsize=THUMB_SIZE)
 
-    colors = gdf["trava_positiva"].fillna(0).astype(int).map(COLORS)
+    if "confirmado" in gdf.columns:
+        colors = [
+            COLOR_CONFIRMED
+            if c
+            else (COLOR_ALERT if t else COLOR_NONE)
+            for c, t in zip(
+                gdf["confirmado"].fillna(0).astype(int),
+                gdf["trava_positiva"].fillna(0).astype(int),
+            )
+        ]
+    else:
+        colors = [
+            COLOR_ALERT if t else COLOR_NONE
+            for t in gdf["trava_positiva"].fillna(0).astype(int)
+        ]
+
     gdf.plot(ax=ax, color=colors, edgecolor="white", linewidth=0.15)
 
     if points_path and points_path.exists():
         points = gpd.read_file(points_path)
         if not points.empty:
             points.plot(
-                ax=ax, color="#4a0000", markersize=4, edgecolor="white", linewidth=0.3
+                ax=ax, color="#000000", markersize=8, edgecolor="white", linewidth=0.3
             )
 
     ax.set_axis_off()
@@ -246,11 +263,13 @@ def write_gallery(sections_html: str, total: int, output_path: Path) -> None:
   (beta {TARGET_BETA}) e veto do regressor em {TARGET_VETO_DAYS} dias.
 </p>
 <p class="legend">
-  <span style="background:#d73027"></span> alerta ativo
+  <span style="background:{COLOR_CONFIRMED}"></span> confirmado pelo consórcio
   &nbsp;&nbsp;
-  <span style="background:#1a9850"></span> sem alerta
+  <span style="background:{COLOR_ALERT}"></span> alerta do modelo
   &nbsp;&nbsp;
-  <span style="background:#4a0000;border-radius:50%"></span> ocorrência confirmada
+  <span style="background:{COLOR_NONE}"></span> sem alerta
+  &nbsp;&nbsp;
+  <span style="background:#000000;border-radius:50%"></span> ocorrência registrada
 </p>
 {sections_html}
 </body>
