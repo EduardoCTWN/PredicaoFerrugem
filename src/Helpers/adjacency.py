@@ -2,7 +2,7 @@ from functools import lru_cache
 
 import geopandas as gpd
 
-from Helpers.municiples import load_municipalities
+from municiples import load_municipalities
 
 
 @lru_cache(maxsize=1)

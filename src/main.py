@@ -20,7 +20,7 @@ import features
 import generate_geojson
 import hybrid_model
 from relatory import write_report
-from src.Helpers import adjacency
+from Helpers import adjacency
 
 # Keep the token
 _token = None
