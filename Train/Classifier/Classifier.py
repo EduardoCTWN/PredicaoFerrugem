@@ -4,7 +4,6 @@ import numpy as np
 import os
 from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.metrics import (
-    precision_recall_curve,
     r2_score,
     mean_squared_error,
     mean_absolute_error,
@@ -109,24 +108,8 @@ def balance(df_train):
 #######################################################
 
 
-def find_best_threshold(y_true, y_pred, beta=1.0):
-    """
-    Return the threshold that maximizes the F-beta score on out-of-fold
-    predictions. Beta above 1 favors recall, below 1 favors precision.
-    """
-    precision, recall, thresholds = precision_recall_curve(y_true, y_pred)
-
-    # precision_recall_curve returns one more point than thresholds
-    precision, recall = precision[:-1], recall[:-1]
-
-    b2 = beta**2
-    fbeta = (1 + b2) * precision * recall / (b2 * precision + recall + 1e-9)
-
-    return float(thresholds[np.argmax(fbeta)])
-
-
 # CHECK LATER THE ADDING OF THE GROUP PARAMETER ##############################################
-def kfold_train(X, y, groups, report_file, model_type="rf", n_splits=5, beta=1.0):
+def kfold_train(X, y, groups, report_file, model_type="rf", n_splits=5):
     """
     Run stratified k-fold cross-validation with the chosen model and return the metrics and the final fitted model.
     """
@@ -134,7 +117,6 @@ def kfold_train(X, y, groups, report_file, model_type="rf", n_splits=5, beta=1.0
     sgkf = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=42)
 
     r2s, maes, rmses = [], [], []
-    oof_true, oof_pred = [], []
 
     def create_model():
         if model_type == "lgbm":
@@ -153,10 +135,8 @@ def kfold_train(X, y, groups, report_file, model_type="rf", n_splits=5, beta=1.0
                 n_jobs=8,
             )
         elif model_type == "xgb":
-            ratio = 1.5
             return xgb.XGBRegressor(
                 objective="binary:logistic",
-                # scale_pos_weight=ratio,
                 eval_metric="auc",
                 n_estimators=1000,
                 learning_rate=0.05,
@@ -193,29 +173,18 @@ def kfold_train(X, y, groups, report_file, model_type="rf", n_splits=5, beta=1.0
         y_pred = model.predict(X_val)
         r2s.append(r2_score(y_val, y_pred))
         maes.append(mean_absolute_error(y_val, y_pred))
-        oof_true.append(y_val.to_numpy())
-        oof_pred.append(y_pred)
         rmses.append(np.sqrt(mean_squared_error(y_val, y_pred)))
-
-    oof_true = np.concatenate(oof_true)
-    oof_pred = np.concatenate(oof_pred)
-
-    best_threshold = find_best_threshold(oof_true, oof_pred, beta)
-    report_file.write(
-        f"Out-of-fold threshold: {best_threshold:.4f} with beta = {beta}\n"
-    )
 
     # Train the final model with all the data
     final_model = create_model()
     final_model.fit(X, y)
 
-    feature_importance = calculate_feature_importance(final_model, X, report_file)
+    calculate_feature_importance(final_model, X, report_file)
 
     return {
         "r2_mean": np.mean(r2s),
         "mae_mean": np.mean(maes),
         "rmse_mean": np.mean(rmses),
-        "threshold": best_threshold,
         "model": final_model,
     }
 
@@ -256,7 +225,7 @@ def calculate_feature_importance(model, X, report_file):
 #######################################################
 
 
-def evaluate_harvest(model, df_test, threshold, temp_includes):
+def evaluate_harvest(model, df_test, temp_includes):
     # Drop the columns that won't be used in the test - to avoid leak
     cols_to_drop = ["ocorrencia_id", "data", "data_ocorrencia", "target", "safra"]
     if not temp_includes:
@@ -268,53 +237,11 @@ def evaluate_harvest(model, df_test, threshold, temp_includes):
     # It predicts once to save time - batch prediction
     Y_pred_all = model.predict(X_test_all)
 
-    # Add the prediction to the dataframe for further operations
-    df_results = df_test[["ocorrencia_id", "target"]].copy()
-    df_results["pred"] = Y_pred_all
-
-    errors, tp, fp, fn, tn = [], 0, 0, 0, 0
-
-    # We group the results here just to calculate some stats
-    for ocorrencia_id, group in df_results.groupby("ocorrencia_id"):
-        Y_test = group["target"]
-        y_pred = group["pred"]
-
-        # Here we calculate the day error
-        indexes_above_threshold = np.where(y_pred.values >= threshold)[0]
-        if len(indexes_above_threshold) > 0:
-            last_index = indexes_above_threshold[-1]
-            errors.append(last_index)
-
-        # confusion matrix - vectorized
-        true_label = Y_test.astype(int)
-        pred_label = (y_pred > threshold).astype(int)
-
-        tp += ((true_label == 1) & (pred_label == 1)).sum()
-        fp += ((true_label == 0) & (pred_label == 1)).sum()
-        fn += ((true_label == 1) & (pred_label == 0)).sum()
-        tn += ((true_label == 0) & (pred_label == 0)).sum()
-
-    # Final stats
-    r2 = r2_score(Y_test_all, Y_pred_all)
-    mae = mean_absolute_error(Y_test_all, Y_pred_all)
-    rmse = np.sqrt(mean_squared_error(Y_test_all, Y_pred_all))
-    auc = roc_auc_score(Y_test_all, Y_pred_all)
-
-    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-
     return {
-        "day_error": np.mean(errors) if errors else np.nan,
-        "r2_test": r2,
-        "mae_test": mae,
-        "rmse_test": rmse,
-        "auc_test": auc,
-        "tp": tp,
-        "fp": fp,
-        "tn": tn,
-        "fn": fn,
-        "recall": recall,
-        "precision": precision,
+        "r2_test": r2_score(Y_test_all, Y_pred_all),
+        "mae_test": mean_absolute_error(Y_test_all, Y_pred_all),
+        "rmse_test": np.sqrt(mean_squared_error(Y_test_all, Y_pred_all)),
+        "auc_test": roc_auc_score(Y_test_all, Y_pred_all),
     }
 
 
@@ -332,7 +259,6 @@ def run(
     model_name: str = "XGB_time_classifier",
     temp_includes: bool = True,
     output_path: str = None,
-    beta: float = 1.0,
 ):
     df = load_data()
 
@@ -340,7 +266,7 @@ def run(
     # stay together and past versions are never overwritten.
     run_id = (
         f"{execution_started_at:%Y%m%d_%H%M%S}_{model_type}"
-        f"_beta{beta}_temp{int(temp_includes)}"
+        f"_temp{int(temp_includes)}"
     )
     run_dir = os.path.join("Train/Classifier/Runs", run_id)
 
@@ -361,9 +287,7 @@ def run(
         # Header with everything needed to reproduce this run.
         f.write(f"Run: {run_id}\n")
         f.write(f"Started at: {execution_started_at:%Y-%m-%d %H:%M:%S}\n")
-        f.write(
-            f"Model: {model_type} | beta: {beta} | temp_includes: {temp_includes}\n"
-        )
+        f.write(f"Model: {model_type} | temp_includes: {temp_includes}\n")
 
         for test_harvest in harvests:
             f.write(f"\n------------ Testing {test_harvest} harvest ------------\n")
@@ -375,7 +299,7 @@ def run(
                 f.write(f"Skipping {test_harvest}: {e}\n")
                 continue
 
-            # df_train = balance(df_train)
+            df_train = balance(df_train)
 
             groups = df_train["ocorrencia_id"]
 
@@ -386,18 +310,14 @@ def run(
             X = df_train.drop(columns=drop_cols)
             y = df_train["target"]
 
-            metrics_kfold = kfold_train(X, y, groups, f, model_type, beta=beta)
+            metrics_kfold = kfold_train(X, y, groups, f, model_type)
 
             file_name_model = f"{model_name}_{test_harvest}.pkl"
             full_path_models = os.path.join(models_dir, file_name_model)
 
-            # The threshold travels with the model, so inference never has
-            # to guess which cut this model was calibrated for.
             joblib.dump(
                 {
                     "model": metrics_kfold["model"],
-                    "threshold": metrics_kfold["threshold"],
-                    "beta": beta,
                     "temp_includes": temp_includes,
                 },
                 full_path_models,
@@ -412,7 +332,6 @@ def run(
             metrics_test = evaluate_harvest(
                 metrics_kfold["model"],
                 df_test,
-                metrics_kfold["threshold"],
                 temp_includes,
             )
 
@@ -426,19 +345,10 @@ def run(
                     "year": test_harvest,
                     "model_name": model_name,
                     "model_path": full_path_models,
-                    "average_day_error": metrics_test["day_error"],
                     "average_R2": metrics_kfold["r2_mean"],
                     "average_MAE": metrics_kfold["mae_mean"],
                     "average_RMSE": metrics_kfold["rmse_mean"],
                     "average_AUC": metrics_test["auc_test"],
-                    "TP": metrics_test["tp"],
-                    "FP": metrics_test["fp"],
-                    "FN": metrics_test["fn"],
-                    "TN": metrics_test["tn"],
-                    "average_Recall": metrics_test["recall"],
-                    "average_Precision": metrics_test["precision"],
-                    "threshold": metrics_kfold["threshold"],
-                    "beta": beta,
                     "temp_includes": temp_includes,
                     "run_id": run_id,
                 }
@@ -450,13 +360,13 @@ def run(
 
         write_summary(df_results, f)
 
-    append_to_index(run_id, df_results, model_type, beta, temp_includes)
+    append_to_index(run_id, df_results, model_type, temp_includes)
     print(f"\nRun saved to {run_dir}")
 
     return df_results
 
 
-def append_to_index(run_id, df_results, model_type, beta, temp_includes):
+def append_to_index(run_id, df_results, model_type, temp_includes):
     """
     Append one summary row per run to a central index, so runs can be
     compared without opening each report.
@@ -469,13 +379,11 @@ def append_to_index(run_id, df_results, model_type, beta, temp_includes):
     row = {
         "run_id": run_id,
         "model_type": model_type,
-        "beta": beta,
         "temp_includes": temp_includes,
-        "mean_threshold": df_results["threshold"].mean(),
+        "mean_R2": df_results["average_R2"].mean(),
+        "mean_MAE": df_results["average_MAE"].mean(),
+        "mean_RMSE": df_results["average_RMSE"].mean(),
         "mean_AUC": df_results["average_AUC"].mean(),
-        "mean_precision": df_results["average_Precision"].mean(),
-        "mean_recall": df_results["average_Recall"].mean(),
-        "mean_day_error": df_results["average_day_error"].mean(),
     }
 
     pd.DataFrame([row]).to_csv(
@@ -489,18 +397,14 @@ def append_to_index(run_id, df_results, model_type, beta, temp_includes):
 def write_summary(df_results, output_file):
     output_file.write("\n-------- Final average results --------\n")
     output_file.write(
-        "Average R2: {:.3f}, Average MAE: {:.2f}, Average RMSE: {:.2f}, Average AUC: {:.3f},  "
-        "Average precision: {:.2f}, Average recall: {:.2f}, average day error {:.2f}\n".format(
+        "Average R2: {:.3f}, Average MAE: {:.2f}, Average RMSE: {:.2f}, Average AUC: {:.3f}\n".format(
             df_results["average_R2"].mean(),
             df_results["average_MAE"].mean(),
             df_results["average_RMSE"].mean(),
             df_results["average_AUC"].mean(),
-            df_results["average_Precision"].mean(),
-            df_results["average_Recall"].mean(),
-            df_results["average_day_error"].mean(),
         )
     )
 
 
 if __name__ == "__main__":
-    run(datetime.now(), beta=2.0)
+    run(datetime.now())
