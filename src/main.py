@@ -216,10 +216,9 @@ def send_geojson(
 
 def main(
     base_date: pd.Timestamp,
-    classifier_threshold=None,
-    regressor_threshold=None,
-    beta=None,
-    min_consecutive: int = 1,
+    classifier_threshold: float,
+    regressor_threshold: int,
+    min_consecutive: int,
 ) -> tuple[str, str]:
     cfg = read_cfg()
     stamp = base_date.strftime("%Y%m%d")
@@ -265,14 +264,6 @@ def main(
 
     df["municipio_id"] = normalize_municipio_id(df["municipio_id"])
 
-    # --- model ---
-    prediction = hybrid_model.predict(df, classifier_threshold, regressor_threshold)
-    prediction = hybrid_model.apply_latch(prediction, min_consecutive)
-    prediction = adjacency.neighbours_alert(prediction)
-    prediction = correction.correct_model(prediction, arrival, season)
-    consolidated = hybrid_model.consolidate_by_municipalitie(prediction)
-    consolidated["municipio_id"] = normalize_municipio_id(consolidated["municipio_id"])
-
     # confirmed occurrences, collected beforehand by the consortium
     # extractor script
     occurrences_csv = BASE_DIR / cfg.get("paths", "occurrences_csv")
@@ -285,13 +276,21 @@ def main(
     occurrences = pd.read_csv(occurrences_csv, encoding="utf-8-sig")
 
     arrival = map_occurrences_to_municipalities(occurrences_csv)
+
+    # --- model ---
+    prediction = hybrid_model.predict(df, classifier_threshold, regressor_threshold)
+    prediction = hybrid_model.apply_latch(prediction, min_consecutive)
+    prediction = adjacency.neighbours_alert(prediction)
+    prediction = correction.correct_model(prediction, arrival, season)
+    consolidated = hybrid_model.consolidate_by_municipalitie(prediction)
+    consolidated["municipio_id"] = normalize_municipio_id(consolidated["municipio_id"])
+
     consolidated = consolidated.merge(
         arrival[arrival["safra"] == season], on="municipio_id", how="left"
     )
 
     config = {
         "threshold": classifier_threshold,
-        "beta": beta,
         "veto_days": regressor_threshold,
         "min_consecutive": min_consecutive,
     }
@@ -324,26 +323,20 @@ if __name__ == "__main__":
     parser.add_argument(
         "--threshold",
         type=float,
-        default=None,
-        help="limiar do classificador (padrão: o calibrado no treino)",
-    )
-    parser.add_argument(
-        "--beta",
-        type=float,
-        default=None,
-        help="beta com que o limiar foi calibrado; só registra no relatório",
+        required=True,
+        help="corte do classificador",
     )
     parser.add_argument(
         "--veto-days",
         type=int,
-        default=None,
-        help="dias acima dos quais o alerta é vetado pelo regressor",
+        required=True,
+        help="valor de veto_days",
     )
     parser.add_argument(
         "--min-consecutive",
         type=int,
-        default=1,
-        help="dias positivos seguidos para fechar a trava",
+        required=True,
+        help="valor de min_consecutive",
     )
 
     args = parser.parse_args()
@@ -354,4 +347,4 @@ if __name__ == "__main__":
         else pd.to_datetime(datetime.now().date())
     )
 
-    main(data, args.threshold, args.veto_days, args.beta, args.min_consecutive)
+    main(data, args.threshold, args.veto_days, args.min_consecutive)
