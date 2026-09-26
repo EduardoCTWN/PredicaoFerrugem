@@ -21,7 +21,7 @@ import generate_geojson
 import hybrid_model
 from relatory import write_report
 from Helpers import adjacency
-from src.Helpers import correction
+from Helpers import correction
 
 # Keep the token
 _token = None
@@ -214,121 +214,6 @@ def send_geojson(
 
     print(f"enviado: {remote_dir}/{name}")
 
-
-def print_evaluation(prediction, consolidated, arrival, season, base_date, config):
-    """
-    Print every metric used to judge the run, so a single console output
-    tells whether this configuration is better than the previous one.
-    """
-    total = len(consolidated)
-    positivos = int(consolidated["trava_positiva"].sum())
-
-    # The alert date is the first day the latch closed, which is what the
-    # map actually shows.
-    data_alerta = (
-        prediction[prediction["trava_positiva"] == 1]
-        .groupby("municipio_id")["data"]
-        .min()
-        .rename("data_alerta")
-        .reset_index()
-    )
-
-    arrival_season = arrival[arrival["safra"] == season]
-    confirmados = set(arrival_season["municipio_id"])
-
-    comparacao = data_alerta.merge(arrival_season, on="municipio_id", how="inner")
-
-    print("\n" + "=" * 62)
-    print(f"AVALIAÇÃO — {base_date:%Y-%m-%d}  |  safra {season}")
-    print("=" * 62)
-
-    print("\nConfiguração")
-    for k, v in config.items():
-        print(f"  {k:<32} {v}")
-
-    print("\nCobertura")
-    print(f"  {'municípios avaliados':<32} {total:>8d}")
-    print(f"  {'com alerta ativo':<32} {positivos:>8d}  ({positivos / total:.1%})")
-    print(f"  {'instâncias processadas':<32} {len(prediction):>8d}")
-
-    print("\nProbabilidade prevista (último dia da série)")
-    prob = prediction["predito_prob"]
-    print(f"  {'média':<32} {prob.mean():>8.3f}")
-    print(f"  {'mediana':<32} {prob.median():>8.3f}")
-
-    if comparacao.empty:
-        print("\nSem ocorrências confirmadas para comparar nesta safra.")
-        print("=" * 62 + "\n")
-        return
-
-    antecedencia = (
-        pd.to_datetime(comparacao["data_chegada_real"])
-        - pd.to_datetime(comparacao["data_alerta"])
-    ).dt.days
-
-    n = len(antecedencia)
-    antes = int((antecedencia > 0).sum())
-
-    print("\nAntecedência do alerta (dias antes da ocorrência confirmada)")
-    print(f"  {'municípios confirmados':<32} {n:>8d}")
-    print(f"  {'alertados ANTES da ocorrência':<32} {antes:>8d}  ({antes / n:.1%})")
-    print(f"  {'mediana':<32} {antecedencia.median():>8.1f}")
-    print(f"  {'média':<32} {antecedencia.mean():>8.1f}")
-    print(f"  {'desvio padrão':<32} {antecedencia.std():>8.1f}")
-    print(f"  {'melhor caso':<32} {antecedencia.max():>8.0f}")
-    print(f"  {'pior caso':<32} {antecedencia.min():>8.0f}")
-
-    print("\n  Distribuição:")
-    faixas = [
-        ("mais de 21 dias antes", antecedencia > 21),
-        ("de 8 a 21 dias antes", (antecedencia > 7) & (antecedencia <= 21)),
-        ("de 1 a 7 dias antes", (antecedencia > 0) & (antecedencia <= 7)),
-        ("no dia ou depois", antecedencia <= 0),
-    ]
-    for label, mask in faixas:
-        q = int(mask.sum())
-        print(f"    {label:<30} {q:>6d}  ({q / n:.1%})")
-
-    # Does the model actually tell municipalities apart, or does it just
-    # flag everyone early? If both groups latched around the same date,
-    # the lead time above is an artefact of blanket coverage, not of
-    # prediction.
-    data_alerta["teve_ocorrencia"] = data_alerta["municipio_id"].isin(confirmados)
-
-    print("\nDiscriminação — data em que a trava fechou, por grupo")
-    resumo = (
-        data_alerta.groupby("teve_ocorrencia")["data_alerta"]
-        .agg(["count", "min", "median", "max"])
-        .rename(index={False: "sem ocorrência", True: "com ocorrência"})
-    )
-    for grupo, linha in resumo.iterrows():
-        print(
-            f"  {grupo:<20} n={linha['count']:>4}  "
-            f"primeira={linha['min']:%Y-%m-%d}  "
-            f"mediana={linha['median']:%Y-%m-%d}  "
-            f"última={linha['max']:%Y-%m-%d}"
-        )
-
-    if len(resumo) == 2:
-        delta = (
-            resumo.loc["sem ocorrência", "median"]
-            - resumo.loc["com ocorrência", "median"]
-        ).days
-        print(
-            f"\n  Municípios com ocorrência travaram {delta} dias antes "
-            "dos demais (mediana)."
-        )
-        print("  Valor próximo de zero indica que o modelo não distingue.")
-
-    # Confirmed occurrences the model never flagged: the costly misses.
-    alertados = set(data_alerta["municipio_id"])
-    perdidos = confirmados - alertados
-
-    print(f"\n  {'ocorrências sem alerta algum':<32} {len(perdidos):>8d}")
-
-    print("=" * 62 + "\n")
-
-
 def main(
     base_date: pd.Timestamp,
     classifier_threshold=None,
@@ -377,6 +262,8 @@ def main(
 
     features_path = str(FEATURES_DIR / f"features_{stamp}.csv")
     features.save_results(df, features_path)
+
+    df["municipio_id"] = normalize_municipio_id(df["municipio_id"])
 
     # --- model ---
     prediction = hybrid_model.predict(df, classifier_threshold, regressor_threshold)

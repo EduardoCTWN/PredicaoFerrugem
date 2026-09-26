@@ -272,7 +272,6 @@ def append_to_index(run_id, base_date, season, config, m) -> None:
         "data_base": f"{base_date:%Y-%m-%d}",
         "safra": season,
         "threshold": config.get("threshold"),
-        "beta": config.get("beta"),
         "veto_days": config.get("veto_days"),
         "min_consecutive": config.get("min_consecutive"),
         "git_commit": config.get("git_commit"),

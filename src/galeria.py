@@ -1,16 +1,3 @@
-"""
-Monta uma galeria HTML com os mapas de uma única configuração:
-classificador com limiar 0.5 calibrado com beta=1, e veto do regressor
-em 13 dias.
-
-As 24 datas das duas safras aparecem numa sequência só, ordenadas, para
-que a evolução da cobertura seja lida de ponta a ponta.
-
-Uso:
-    python galeria.py                    # tudo
-    python galeria.py --season 2024/2025
-"""
-
 import argparse
 import base64
 import io
@@ -25,8 +12,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-REPORTS_DIR = BASE_DIR / "output" / "relatorios" / "semanal_vizinhos_min2_com_correcao"
-GALLERY_PATH = REPORTS_DIR / "galeria.html"
+
+REPORTS_DIR = BASE_DIR / "output" / "relatorios" / "semanal_vizinhos"
 
 # Vermelho para alerta, verde para sem alerta: a mesma paleta do mapa
 # interativo, para que a galeria não confunda quem já viu o produto.
@@ -37,16 +24,10 @@ COLOR_NONE = "#1a9850"
 THUMB_SIZE = (3.2, 2.6)
 THUMB_DPI = 70
 
-# Configuração única que a galeria mostra. Comparar mapas de cortes
-# diferentes lado a lado confunde mais do que informa.
-TARGET_THRESHOLD = 0.5
-TARGET_BETA = 1.0
-TARGET_VETO_DAYS = 13
 
-
-def load_index() -> pd.DataFrame:
+def load_index(threshold: float, veto_days: int, min_consecutive: int) -> pd.DataFrame:
     """
-    Read the run index, keep only the target configuration and label each
+    Read the run index, keep only the chosen configuration and label each
     run with it.
     """
     index_path = REPORTS_DIR / "index.csv"
@@ -55,21 +36,19 @@ def load_index() -> pd.DataFrame:
 
     df = pd.read_csv(index_path)
 
-    # Comparar por diferença absoluta, e não por igualdade: um float que
-    # veio de um cálculo falharia silenciosamente no ==.
     df = df[
-        (df["threshold"].sub(TARGET_THRESHOLD).abs() < 1e-6)
-        & (df["veto_days"] == TARGET_VETO_DAYS)
+        (df["threshold"].sub(threshold).abs() < 1e-6)
+        & (df["veto_days"] == veto_days)
+        & (df["min_consecutive"] == min_consecutive)
     ]
-
-    if "beta" in df.columns:
-        df = df[df["beta"].sub(TARGET_BETA).abs() < 1e-6]
 
     if df.empty:
         raise ValueError(
-            f"Nenhuma execução com threshold={TARGET_THRESHOLD}, "
-            f"beta={TARGET_BETA} e veto={TARGET_VETO_DAYS} no índice."
+            f"Nenhuma execução com threshold={threshold}, veto={veto_days} "
+            f"e min_consecutive={min_consecutive} no índice."
         )
+
+    df = df.drop_duplicates(subset="data_base", keep="last")
 
     df["config"] = (
         "thr="
@@ -183,7 +162,7 @@ def card_html(panel: dict) -> str:
 def build_sections(df: pd.DataFrame) -> tuple[str, int]:
     """
     One section per configuration left after the filter, which in
-    practice means one per min_consecutive value.
+    practice means a single section.
     """
     sections = []
     total = 0
@@ -191,8 +170,6 @@ def build_sections(df: pd.DataFrame) -> tuple[str, int]:
     for config in sorted(df["config"].unique()):
         subset = df[df["config"] == config]
 
-        # Todas as datas das duas safras numa sequência só, para que a
-        # evolução da cobertura seja lida de ponta a ponta.
         subset = subset.sort_values("data_base")
 
         panels = [p for p in (build_panel(r) for _, r in subset.iterrows()) if p]
@@ -205,8 +182,6 @@ def build_sections(df: pd.DataFrame) -> tuple[str, int]:
 
         cards = "".join(card_html(p) for p in panels)
 
-        # Averages let the reader judge the configuration before looking
-        # at any individual map.
         mean_auc = subset["auc_espacial"].mean()
         mean_cov = subset["cobertura"].mean()
         mean_lost = subset["perdidos"].mean()
@@ -228,7 +203,14 @@ def build_sections(df: pd.DataFrame) -> tuple[str, int]:
     return "".join(sections), total
 
 
-def write_gallery(sections_html: str, total: int, output_path: Path) -> None:
+def write_gallery(
+    sections_html: str,
+    total: int,
+    output_path: Path,
+    threshold: float,
+    veto_days: int,
+    min_consecutive: int,
+) -> None:
     html = f"""<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -259,8 +241,9 @@ def write_gallery(sections_html: str, total: int, output_path: Path) -> None:
 <body>
 <h1>Ferrugem asiática — galeria de execuções</h1>
 <p class="sub">
-  {total} mapas — classificador com limiar {TARGET_THRESHOLD}
-  (beta {TARGET_BETA}) e veto do regressor em {TARGET_VETO_DAYS} dias.
+  {total} mapas — classificador com limiar {threshold},
+  veto do regressor em {veto_days} dias e
+  {min_consecutive} previsões consecutivas para alertar.
 </p>
 <p class="legend">
   <span style="background:{COLOR_CONFIRMED}"></span> confirmado pelo consórcio
@@ -282,15 +265,33 @@ def main():
     parser = argparse.ArgumentParser(
         description="Monta uma galeria HTML com os mapas da configuração escolhida.",
     )
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        required=True,
+        help="corte do classificador usado no sweep",
+    )
+    parser.add_argument(
+        "--veto-days",
+        type=int,
+        required=True,
+        help="valor de veto_days usado no sweep",
+    )
+    parser.add_argument(
+        "--min-consecutive",
+        type=int,
+        required=True,
+        help="valor de min_consecutive usado no sweep",
+    )
     parser.add_argument("--season", default=None, help='ex: "2024/2025"')
     parser.add_argument(
         "--output",
-        default=str(GALLERY_PATH),
-        help="caminho do HTML de saída",
+        default=None,
+        help="caminho do HTML de saída (padrão: um arquivo por configuração)",
     )
     args = parser.parse_args()
 
-    df = load_index()
+    df = load_index(args.threshold, args.veto_days, args.min_consecutive)
 
     if args.season:
         df = df[df["safra"] == args.season]
@@ -307,8 +308,22 @@ def main():
         print("Nenhum mapa encontrado. A varredura rodou com --no-geojson?")
         return
 
-    output_path = Path(args.output)
-    write_gallery(sections_html, total, output_path)
+    if args.output:
+        output_path = Path(args.output)
+    else:
+        output_path = REPORTS_DIR / (
+            f"galeria_thr{args.threshold}_veto{args.veto_days}"
+            f"_minc{args.min_consecutive}.html"
+        )
+
+    write_gallery(
+        sections_html,
+        total,
+        output_path,
+        args.threshold,
+        args.veto_days,
+        args.min_consecutive,
+    )
 
     size_mb = output_path.stat().st_size / 1e6
     print(f"\n{total} mapas em {output_path} ({size_mb:.1f} MB)")

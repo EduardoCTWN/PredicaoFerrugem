@@ -1,6 +1,10 @@
 import pandas as pd
 
 def correct_model(prediction, arrival, season):
+    """ 
+    If the occorrence is reported and the model does not alert it, this function
+    mark that municiple as alert
+    """
     arrival_season = arrival[arrival["safra"] == season]
 
     confirmed = dict(

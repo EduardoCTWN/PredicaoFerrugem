@@ -122,12 +122,13 @@ def run(
     base_date,
     classifier_threshold,
     threshold_regressor,
+    min_consecutive = 1,
 ) -> pd.DataFrame:
     df = pd.read_csv(features_path, sep=";")
     df["data"] = pd.to_datetime(df["data"])
 
     predictions = predict(df, classifier_threshold, threshold_regressor)
-    predictions = apply_latch(df)
+    predictions = apply_latch(df, min_consecutive)
 
     consolidated = consolidate_by_municipalitie(predictions)
 
